@@ -451,6 +451,7 @@ if __name__ == '__main__':
     @app.route('/')
     def home(): return "Бот работает, пацаны!"
     Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080))), daemon=True).start()
-    
+
+    bot.remove_webhook()
     # Запускаем самого бота
     bot.infinity_polling()
