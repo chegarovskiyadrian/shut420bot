@@ -1,9 +1,8 @@
 import os
 import time
-import datetime
 import random
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import telebot
 from pymongo import MongoClient
@@ -397,7 +396,7 @@ def background_worker():
     while True:
         try:
             now = time.time()
-            now_msk = datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=3)
+            now_msk = datetime.now(timezone.utc) + timedelta(hours=3)
             current_time = now_msk.strftime("%H:%M")
             current_day = now_msk.strftime("%Y-%m-%d")
             
