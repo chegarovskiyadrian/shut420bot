@@ -396,7 +396,7 @@ def background_worker():
     while True:
         try:
             now = time.time()
-            now_msk = datetime.utcnow() + timedelta(hours=3)
+            now_msk = datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=3)
             current_time = now_msk.strftime("%H:%M")
             current_day = now_msk.strftime("%Y-%m-%d")
             
