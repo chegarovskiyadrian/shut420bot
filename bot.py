@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 import telebot
 from pymongo import MongoClient
+from flask import Flask
 
 # === НАСТРОЙКИ И ПОДКЛЮЧЕНИЕ К БД ===
 TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
@@ -26,9 +27,7 @@ SHOP_ITEMS = {
     "houses": {"Машина у Европолиса": 10000, "Дом Хайруллы": 45000, "Дом Шутова": 90000, "Дом Быстрова": 180000, "Дом Егорова": 350000, "Дом Чегаровского": 700000, "Дом Панкратова": 1500000, "Дом Просоловича": 3000000, "Дом Алисы": 6500000, "Дом Иванова": 12000000, "Дом Оганисяна": 25000000, "Дом Сифона": 60000000, "Клоповник": 100000000}
 }
 
-IMAGE_URLS = {
-    # Сюда вставишь ссылки на картинки (например: "Жигуль": "https://link.jpg")
-}
+IMAGE_URLS = {}
 
 BIZ_DATA = {
     "Фудкорт": {"price": 5000, "income": 100, "up": 3000},
@@ -68,7 +67,6 @@ def update_user(user_id, updates):
     users_col.update_one({"_id": user_id}, {"$set": updates})
 
 def check_bankruptcy(user):
-    # Если баланс 0, нет бизнесов и пустой склад — спасаем от тильта
     if user["balance"] <= 0:
         total_biz_lvls = sum(user.get("biz", {}).values())
         total_items = sum(user.get("inv", {}).values())
@@ -77,52 +75,13 @@ def check_bankruptcy(user):
             return True
     return False
 
-# === СТАТИСТИКА И ТРИГГЕРЫ ===
-@bot.message_handler(content_types=['text', 'voice', 'video_note'])
-def handle_all_messages(message):
-    u = get_user(message.from_user.id, message.from_user.username)
-    updates = {}
-    
-    if message.content_type == 'text':
-        updates["msg_count"] = u.get("msg_count", 0) + 1
-        text_lower = message.text.lower()
-        
-        # Антимат
-        settings = settings_col.find_one({"_id": "config"}) or {"bad_words": [], "triggers": {}}
-        for word in settings.get("bad_words", []):
-            if word in text_lower:
-                updates["violations"] = u.get("violations", 0) + 1
-                bot.reply_to(message, random.choice(["За такой базар можно и на бутылку присесть.", "Фильтруй речь, тут приличные люди."]))
-                break
-                
-        # Триггеры
-        for trig, ans in settings.get("triggers", {}).items():
-            if trig in text_lower:
-                bot.reply_to(message, ans)
-                break
-                
-    elif message.content_type == 'voice':
-        updates["voice_count"] = u.get("voice_count", 0) + 1
-        if random.random() < 0.02:
-            bot.reply_to(message, random.choice([
-                "Опять Virtuoz432 демку надиктовывает, ждем развал кабин.",
-                "Перешлите это Глебу, он оценит.",
-                "Маша, ты это слышала?",
-                "Лучше бы пошел 75 кг от груди пожал, чем в микрофон дышать."
-            ]))
-            
-    elif message.content_type == 'video_note':
-        updates["video_count"] = u.get("video_count", 0) + 1
-        if random.random() < 0.02:
-            bot.reply_to(message, "Что за VHS-вайб? На Sony w630 снимал?")
-            
-    # Сохраняем чат для ежедневной рассылки
-    if message.chat.type in ['group', 'supergroup']:
-        settings_col.update_one({"_id": "config"}, {"$set": {"main_chat_id": message.chat.id}}, upsert=True)
-        
-    update_user(u["_id"], updates)
+# === КОМАНДЫ БОТА ===
 
-# === КОМАНДЫ ЭКОНОМИКИ ===
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    u = get_user(message.from_user.id, message.from_user.username)
+    bot.reply_to(message, "✌️ Салют! Бот запущен и работает. Напиши `/stats` или `/business`, чтобы начать замуты.", parse_mode="Markdown")
+
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
     users = list(users_col.find())
@@ -187,7 +146,6 @@ def buy_item(message):
     else:
         bot.reply_to(message, caption, parse_mode="Markdown")
 
-# === БИЗНЕСЫ ===
 @bot.message_handler(commands=['business'])
 def my_biz(message):
     u = get_user(message.from_user.id, message.from_user.username)
@@ -245,7 +203,6 @@ def collect_biz(message):
     update_user(u["_id"], {"balance": u["balance"] + total_income, "last_collect": now})
     bot.reply_to(message, f"💰 Выручка за {hours} ч. собрана: +{total_income}!")
 
-# === НАРКОИМПЕРИЯ ===
 @bot.message_handler(commands=['drug_buy'])
 def d_buy(message):
     u = get_user(message.from_user.id, message.from_user.username)
@@ -296,20 +253,20 @@ def d_sell(message):
         u["last_pers_sale_time"] = time.time()
         
         rand = random.random()
-        if rand < 0.05: # Полиция ловит
+        if rand < 0.05:
             penalty = int(u["balance"] * 0.3)
             update_user(u["_id"], {"balance": max(0, u["balance"] - penalty), "inv": u["inv"], "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
             return bot.reply_to(message, f"🚨 ОБЛАВА! Товар конфискован. Штраф: {penalty}.")
             
-        elif rand < 0.15: # Полиция на точке (10% шанс)
+        elif rand < 0.15:
             sold = max(1, int(qty * 0.5))
             returned = qty - sold
-            profit = int(sold * base_p * 1.5) # Наценка с рук 50%
+            profit = int(sold * base_p * 1.5)
             u["inv"][target] += returned
             update_user(u["_id"], {"balance": u["balance"] + profit, "inv": u["inv"], "drug_xp": u["drug_xp"] + sold, "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
             return bot.reply_to(message, f"🏃‍♂️ На точке были менты! Скинул только {sold} шт. Остальное вернул на склад. Прибыль: {profit}.")
             
-        else: # Успех
+        else:
             profit = int(qty * base_p * 1.5)
             update_user(u["_id"], {"balance": u["balance"] + profit, "inv": u["inv"], "drug_xp": u["drug_xp"] + qty, "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
             return bot.reply_to(message, f"🤝 Успешная сделка с рук! Прибыль: {profit}.")
@@ -322,7 +279,6 @@ def d_sell(message):
         if user_p > max_p: return bot.reply_to(message, f"❌ Слишком жадно. Максимальная цена для закладок: {max_p}.")
         
         ratio = user_p / base_p
-        # От 5 минут (если дешево) до 24 часов (если очень дорого)
         duration_sec = int(300 * (ratio ** 3) * (qty * 0.1))
         duration_sec = max(300, min(86400, duration_sec))
         
@@ -347,7 +303,6 @@ def d_stat(message):
             text += f"▪️ {s['item']} ({s['qty']} шт.) — Осталось {rem} мин.\n"
     bot.reply_to(message, text)
 
-# === КАЗИНО И ИГРЫ ===
 @bot.message_handler(commands=['slots'])
 def play_slots(message):
     u = get_user(message.from_user.id, message.from_user.username)
@@ -390,7 +345,51 @@ def get_weather(message):
     except:
         bot.reply_to(message, "❌ Метеостанцию затопило.")
 
-# === ФОНОВЫЙ ПРОЦЕССОР (Закладки и 16:20) ===
+# === КРИТИЧЕСКИЙ ОБРАБОТЧИК (ПЕРЕНЕСЕН В САМЫЙ НИЗ) ===
+@bot.message_handler(content_types=['text', 'voice', 'video_note'])
+def handle_all_messages(message):
+    u = get_user(message.from_user.id, message.from_user.username)
+    updates = {}
+    
+    if message.content_type == 'text':
+        updates["msg_count"] = u.get("msg_count", 0) + 1
+        text_lower = message.text.lower()
+        
+        # Антимат
+        settings = settings_col.find_one({"_id": "config"}) or {"bad_words": [], "triggers": {}}
+        for word in settings.get("bad_words", []):
+            if word in text_lower:
+                updates["violations"] = u.get("violations", 0) + 1
+                bot.reply_to(message, random.choice(["За такой базар можно и на бутылку присесть.", "Фильтруй речь, тут приличные люди."]))
+                break
+                
+        # Триггеры
+        for trig, ans in settings.get("triggers", {}).items():
+            if trig in text_lower:
+                bot.reply_to(message, ans)
+                break
+                
+    elif message.content_type == 'voice':
+        updates["voice_count"] = u.get("voice_count", 0) + 1
+        if random.random() < 0.02:
+            bot.reply_to(message, random.choice([
+                "Опять Virtuoz432 демку надиктовывает, ждем развал кабин.",
+                "Перешлите это Глебу, он оценит.",
+                "Маша, ты это слышала?",
+                "Лучше бы пошел 75 кг от груди пожал, чем в микрофон дышать."
+            ]))
+            
+    elif message.content_type == 'video_note':
+        updates["video_count"] = u.get("video_count", 0) + 1
+        if random.random() < 0.02:
+            bot.reply_to(message, "What a VHS vibe! На Sony w630 снимал?")
+            
+    if message.chat.type in ['group', 'supergroup']:
+        settings_col.update_one({"_id": "config"}, {"$set": {"main_chat_id": message.chat.id}}, upsert=True)
+        
+    update_user(u["_id"], updates)
+
+# === ФОНОВЫЙ ПРОЦЕССОР ===
 def background_worker():
     last_420 = ""
     while True:
@@ -400,15 +399,14 @@ def background_worker():
             current_time = now_msk.strftime("%H:%M")
             current_day = now_msk.strftime("%Y-%m-%d")
             
-            # Обработка закладок
             for u in users_col.find({"active_sales": {"$not": {"$size": 0}}}):
                 active = []
                 balance_add = 0
                 xp_add = 0
                 for s in u["active_sales"]:
                     if now >= s["eta"]:
-                        if random.random() > 0.10: # 10% шанс ненахода
-                            profit = int((s["price"] * s["qty"]) * 0.8) # 20% курьеру
+                        if random.random() > 0.10:
+                            profit = int((s["price"] * s["qty"]) * 0.8)
                             balance_add += profit
                             xp_add += s["qty"]
                             bot.send_message(u["_id"], f"✅ Твои закладки ({s['item']}) проданы! Прибыль: {profit} (с учетом доли курьера).")
@@ -420,7 +418,6 @@ def background_worker():
                 if balance_add > 0 or len(active) != len(u["active_sales"]):
                     update_user(u["_id"], {"active_sales": active, "balance": u["balance"] + balance_add, "drug_xp": u["drug_xp"] + xp_add})
                     
-                    # Проверка левелапа
                     new_lvl = u["drug_lvl"]
                     for lvl, xp in LEVEL_XP.items():
                         if u["drug_xp"] + xp_add >= xp and lvl > new_lvl: new_lvl = lvl
@@ -428,7 +425,6 @@ def background_worker():
                         update_user(u["_id"], {"drug_lvl": new_lvl})
                         bot.send_message(u["_id"], f"👑 Уровень империи повышен до {new_lvl}!")
 
-            # Рассылка 16:20
             conf = settings_col.find_one({"_id": "config"})
             if conf and conf.get("main_chat_id") and current_time == "16:20" and last_420 != current_day:
                 last_420 = current_day
@@ -440,18 +436,27 @@ def background_worker():
             print("Ошибка в потоке:", e)
             time.sleep(15)
 
+# === НАДЕЖНЫЙ ЗАПУСК СЕРВЕРА И БОТА ===
 if __name__ == '__main__':
-    # Запускаем фоновые задачи (закладки, рассылку)
+    # 1. Фоновые задачи (закладки и 16:20)
     threading.Thread(target=background_worker, daemon=True).start()
     
-    # Запускаем Flask-сервер, чтобы Render считал, что это сайт
-    from flask import Flask
-    from threading import Thread
+    # 2. Безопасный запуск пуллинга ТГ-бота
+    def run_bot_polling():
+        try:
+            bot.remove_webhook()
+            print("!!! БОТ УСПЕШНО ЗАПУСТИЛ POLLING !!!")
+            bot.infinity_polling(skip_pending=True)
+        except Exception as e:
+            print(f"Критическая ошибка пуллинга: {e}")
+
+    threading.Thread(target=run_bot_polling, daemon=True).start()
+
+    # 3. Flask-сервер в основном потоке для Render
     app = Flask(__name__)
     @app.route('/')
-    def home(): return "Бот работает, пацаны!"
-    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080))), daemon=True).start()
-
-    bot.remove_webhook()
-    # Запускаем самого бота
-    bot.infinity_polling()
+    def home(): 
+        return "Бот работает, пацаны!"
+    
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
