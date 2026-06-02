@@ -38,12 +38,28 @@ BIZ_DATA = {
 }
 
 DRUGS_DATA = {
-    "LQ": {"price": 1000, "level": 1}, "OG KUSH": {"price": 1500, "level": 1}, "Синдикат": {"price": 800, "level": 1},
-    "AK47": {"price": 2000, "level": 3}, "La Mouse": {"price": 2200, "level": 3}, "Амфетамин": {"price": 1700, "level": 3}, "Мефедрон": {"price": 1800, "level": 3},
-    "MANGO KUSH": {"price": 3000, "level": 5}, "Sonic": {"price": 3400, "level": 5}, "Альфа-ПВП": {"price": 1000, "level": 5}, "Экстази": {"price": 1400, "level": 5},
-    "Кокаин": {"price": 7000, "level": 7}, "Марка LSD": {"price": 1500, "level": 7},
-    "Марка NBome": {"price": 600, "level": 10}, "Грибы Golden Teacher": {"price": 2450, "level": 10}, "2C-B": {"price": 4080, "level": 10},
-    "DMT": {"price": 66666, "level": 15}
+    # === ШИШКИ ===
+    "OG KUSH": {"price": 1500, "level": 1, "category": "шишки"},
+    "AK47": {"price": 2000, "level": 3, "category": "шишки"},
+    "MANGO KUSH": {"price": 3000, "level": 5, "category": "шишки"},
+    
+    # === ГАШИШ ===
+    "Синдикат": {"price": 800, "level": 1, "category": "гашиш"},
+    "La Mouse": {"price": 2200, "level": 3, "category": "гашиш"},
+    "Sonic": {"price": 3400, "level": 5, "category": "гашиш"},
+    
+    # === ОСТАЛЬНОЕ ===
+    "LQ": {"price": 1000, "level": 1, "category": "остальное"},
+    "Амфетамин": {"price": 1700, "level": 3, "category": "остальное"},
+    "Мефедрон": {"price": 1800, "level": 3, "category": "остальное"},
+    "Альфа-ПВП": {"price": 1000, "level": 5, "category": "остальное"},
+    "Экстази": {"price": 1400, "level": 5, "category": "остальное"},
+    "Марка LSD": {"price": 1500, "level": 7, "category": "остальное"},
+    "Кокаин": {"price": 7000, "level": 7, "category": "остальное"},
+    "Марка NBome": {"price": 600, "level": 10, "category": "остальное"},
+    "Грибы Golden Teacher": {"price": 2450, "level": 10, "category": "остальное"},
+    "2C-B": {"price": 4080, "level": 10, "category": "остальное"},
+    "DMT": {"price": 66666, "level": 15, "category": "остальное"}
 }
 LEVEL_XP = {1:0, 3:50, 5:200, 7:600, 10:1500, 15:5000}
 
@@ -313,11 +329,25 @@ def d_stat(message):
     if not has_items:
         text += "▪️ Склад пуст\n"
         
-    # 2. Вывод доступного ассортимента под уровень
+    # 2. Вывод доступного ассортимента с разделением по категориям
     text += f"\n🛒 **Доступно для закупки (Твой уровень: {current_lvl}):**\n"
-    for item, data in DRUGS_DATA.items():
-        if current_lvl >= data["level"]:
-            text += f"▪️ {item} — {data['price']} монет\n"
+    
+    categories = {
+        "🌿 Шишки": "шишки",
+        "🍫 Гашиш": "гашиш",
+        "🧪 Другое": "остальное"
+    }
+    
+    for cat_title, cat_key in categories.items():
+        # Собираем товары этой категории, которые открыты пользователю
+        cat_items = []
+        for item, data in DRUGS_DATA.items():
+            if data["category"] == cat_key and current_lvl >= data["level"]:
+                cat_items.append(f"  ▪️ {item} — {data['price']} монет")
+        
+        # Если в этой категории что-то открыто, выводим её заголовок и список
+        if cat_items:
+            text += f"\n**{cat_title}:**\n" + "\n".join(cat_items) + "\n"
             
     # 3. Вывод активных закладок
     if u.get("active_sales"):
