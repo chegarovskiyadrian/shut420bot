@@ -34,7 +34,7 @@ BIZ_DATA = {
     "Автомойка": {"price": 15000, "income": 350, "up": 8000},
     "Часы": {"price": 50000, "income": 1200, "up": 25000},
     "Ресейл": {"price": 150000, "income": 4000, "up": 75000},
-    "Наркоимперия": {"price": 500000, "income": 15000, "up": 250000}
+    "Наркоимперия": {"price": 0, "income": 15000, "up": 250000}  # <--- Теперь бесплатно при старте!
 }
 
 DRUGS_DATA = {
@@ -79,7 +79,7 @@ def check_bankruptcy(user):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    u = get_user(message.from_user.id, message.from_user.username)
+    get_user(message.from_user.id, message.from_user.username)
     bot.reply_to(message, "✌️ Салют! Бот запущен и работает. Напиши `/stats` или `/business`, чтобы начать замуты.", parse_mode="Markdown")
 
 @bot.message_handler(commands=['stats'])
@@ -108,7 +108,7 @@ def show_shop(message):
     u = get_user(message.from_user.id, message.from_user.username)
     text = f"🛒 **Магазин ({cat.upper()})**\n\n"
     for item, price in SHOP_ITEMS[cat].items():
-        status = "✅" if item in u[cat] else "❌"
+        status = "✅" if item in u.get(cat, []) else "❌"
         text += f"{status} {item} — `{price}`\n"
     text += "\nКупить: `/buy Название вещи`"
     bot.reply_to(message, text, parse_mode="Markdown")
@@ -128,7 +128,7 @@ def buy_item(message):
         bot.reply_to(message, "❌ Товар не найден. Пиши название точь-в-точь как в списке.")
         return
         
-    if item_name in u[target_cat]:
+    if item_name in u.get(target_cat, []):
         bot.reply_to(message, "😎 У тебя уже есть этот понт.")
         return
         
@@ -136,8 +136,9 @@ def buy_item(message):
         bot.reply_to(message, f"❌ Не хватает кэша. Нужно {price}.")
         return
         
-    u[target_cat].append(item_name)
-    update_user(u["_id"], {"balance": u["balance"] - price, target_cat: u[target_cat]})
+    cat_list = u.get(target_cat, [])
+    cat_list.append(item_name)
+    update_user(u["_id"], {"balance": u["balance"] - price, target_cat: cat_list})
     
     img = IMAGE_URLS.get(item_name)
     caption = f"🎉 @{message.from_user.username} купил **{item_name}** за {price}!"
@@ -149,7 +150,7 @@ def buy_item(message):
 @bot.message_handler(commands=['business'])
 def my_biz(message):
     u = get_user(message.from_user.id, message.from_user.username)
-    text = "🏢 **Твои бизнесы** 🏢\n\n"
+    text = "💼 **Твои замуты** 💼\n\n"  # <--- Переименовано!
     total = 0
     for name, lvl in u["biz"].items():
         if lvl == 0:
@@ -159,7 +160,7 @@ def my_biz(message):
             total += inc
             text += f"🔹 {name} [{lvl}/10] — Доход {inc}/час\n"
     text += f"\n💰 Итого пассива: {total}/час\nПрокачать: `/upgrade Название`\nСобрать кэш: `/collect`"
-    bot.reply_to(message, text)
+    bot.reply_to(message, text, parse_mode="Markdown")
 
 @bot.message_handler(commands=['upgrade'])
 def up_biz(message):
@@ -171,7 +172,7 @@ def up_biz(message):
         bot.reply_to(message, "❌ Бизнес не найден.")
         return
         
-    lvl = u["biz"][target]
+    lvl = u["biz"].get(target, 0)
     if lvl >= 10:
         bot.reply_to(message, "⭐ Максимальный уровень!")
         return
@@ -181,7 +182,7 @@ def up_biz(message):
         bot.reply_to(message, f"❌ Нужно {cost} на апгрейд.")
         return
         
-    u["biz"][target] += 1
+    u["biz"][target] = lvl + 1
     update_user(u["_id"], {"balance": u["balance"] - cost, "biz": u["biz"]})
     bot.reply_to(message, f"📈 {target} улучшен до {lvl + 1} уровня за {cost}!")
 
@@ -209,12 +210,14 @@ def d_buy(message):
     args = message.text.split()
     if len(args) < 3: return bot.reply_to(message, "Шаблон: `/drug_buy [Товар] [Кол-во]`", parse_mode="Markdown")
     
-    qty = int(args[-1])
+    try: qty = int(args[-1])
+    except: return bot.reply_to(message, "❌ Укажи количество числом.")
+    
     item = " ".join(args[1:-1])
     target = next((k for k in DRUGS_DATA.keys() if k.lower() == item.lower()), None)
     
     if not target or qty <= 0: return bot.reply_to(message, "❌ Ошибка в названии или количестве.")
-    if u["drug_lvl"] < DRUGS_DATA[target]["level"]: return bot.reply_to(message, "🔒 Не хватает уровня империи.")
+    if u.get("drug_lvl", 1) < DRUGS_DATA[target]["level"]: return bot.reply_to(message, "🔒 Не хватает уровня империи.")
     
     cost = DRUGS_DATA[target]["price"] * qty
     if u["balance"] < cost: return bot.reply_to(message, f"❌ Нужно {cost}.")
@@ -230,9 +233,12 @@ def d_sell(message):
     args = message.text.split()
     if len(args) < 4: return bot.reply_to(message, "Шаблон: `/drug_sell [Товар] [Кол-во] [закладки/лично] [цена (если закладка)]`", parse_mode="Markdown")
     
-    qty = int(args[-2] if args[-2].isdigit() else args[-3])
-    mode = args[-1].lower() if args[-1].lower() in ["закладки", "лично"] else args[-2].lower()
-    item = " ".join(args[1:args.index(str(qty))])
+    try:
+        qty = int(args[-2] if args[-2].isdigit() else args[-3])
+        mode = args[-1].lower() if args[-1].lower() in ["закладки", "лично"] else args[-2].lower()
+        item = " ".join(args[1:args.index(str(qty))])
+    except:
+        return bot.reply_to(message, "❌ Неверный формат команды.")
     
     target = next((k for k in DRUGS_DATA.keys() if k.lower() == item.lower()), None)
     if not target or u["inv"].get(target, 0) < qty: return bot.reply_to(message, "❌ Товара нет на складе.")
@@ -241,15 +247,15 @@ def d_sell(message):
     
     if mode == "лично":
         today = datetime.now().strftime("%Y-%m-%d")
-        if u["last_pers_sale_day"] != today:
+        if u.get("last_pers_sale_day") != today:
             u["pers_sales_today"] = 0
             u["last_pers_sale_day"] = today
             
-        if u["pers_sales_today"] >= 2: return bot.reply_to(message, "❌ Лимит личных встреч на сегодня исчерпан.")
+        if u.get("pers_sales_today", 0) >= 2: return bot.reply_to(message, "❌ Лимит личных встреч на сегодня исчерпан.")
         if time.time() - u.get("last_pers_sale_time", 0) < 7200: return bot.reply_to(message, "⏱ Заляг на дно, кулдаун 2 часа.")
         
         u["inv"][target] -= qty
-        u["pers_sales_today"] += 1
+        u["pers_sales_today"] = u.get("pers_sales_today", 0) + 1
         u["last_pers_sale_time"] = time.time()
         
         rand = random.random()
@@ -263,12 +269,12 @@ def d_sell(message):
             returned = qty - sold
             profit = int(sold * base_p * 1.5)
             u["inv"][target] += returned
-            update_user(u["_id"], {"balance": u["balance"] + profit, "inv": u["inv"], "drug_xp": u["drug_xp"] + sold, "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
+            update_user(u["_id"], {"balance": u["balance"] + profit, "inv": u["inv"], "drug_xp": u.get("drug_xp", 0) + sold, "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
             return bot.reply_to(message, f"🏃‍♂️ На точке были менты! Скинул только {sold} шт. Остальное вернул на склад. Прибыль: {profit}.")
             
         else:
             profit = int(qty * base_p * 1.5)
-            update_user(u["_id"], {"balance": u["balance"] + profit, "inv": u["inv"], "drug_xp": u["drug_xp"] + qty, "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
+            update_user(u["_id"], {"balance": u["balance"] + profit, "inv": u["inv"], "drug_xp": u.get("drug_xp", 0) + qty, "pers_sales_today": u["pers_sales_today"], "last_pers_sale_time": u["last_pers_sale_time"], "last_pers_sale_day": today})
             return bot.reply_to(message, f"🤝 Успешная сделка с рук! Прибыль: {profit}.")
             
     elif mode == "закладки":
@@ -284,15 +290,16 @@ def d_sell(message):
         
         u["inv"][target] -= qty
         sale = {"id": str(time.time()), "item": target, "qty": qty, "price": user_p, "eta": time.time() + duration_sec}
-        u["active_sales"].append(sale)
+        sales = u.get("active_sales", [])
+        sales.append(sale)
         
-        update_user(u["_id"], {"inv": u["inv"], "active_sales": u["active_sales"]})
+        update_user(u["_id"], {"inv": u["inv"], "active_sales": sales})
         bot.reply_to(message, f"📦 Клады раскиданы ({qty} шт). По цене {user_p} они разойдутся примерно за {duration_sec // 60} мин.")
 
 @bot.message_handler(commands=['drug_status'])
 def d_stat(message):
     u = get_user(message.from_user.id, message.from_user.username)
-    text = f"🍁 **ИМПЕРИЯ** (Уровень: {u['drug_lvl']}) | Опыт: {u['drug_xp']}\n\nСклад:\n"
+    text = f"🍁 **ИМПЕРИЯ** (Уровень: {u.get('drug_lvl', 1)}) | Опыт: {u.get('drug_xp', 0)}\n\nСклад:\n"
     for k, v in u.get("inv", {}).items():
         if v > 0: text += f"▪️ {k}: {v} шт.\n"
     
@@ -345,7 +352,7 @@ def get_weather(message):
     except:
         bot.reply_to(message, "❌ Метеостанцию затопило.")
 
-# === КРИТИЧЕСКИЙ ОБРАБОТЧИК (ПЕРЕНЕСЕН В САМЫЙ НИЗ) ===
+# === КРИТИЧЕСКИЙ ОБРАБОТЧИК ===
 @bot.message_handler(content_types=['text', 'voice', 'video_note'])
 def handle_all_messages(message):
     u = get_user(message.from_user.id, message.from_user.username)
@@ -355,7 +362,6 @@ def handle_all_messages(message):
         updates["msg_count"] = u.get("msg_count", 0) + 1
         text_lower = message.text.lower()
         
-        # Антимат
         settings = settings_col.find_one({"_id": "config"}) or {"bad_words": [], "triggers": {}}
         for word in settings.get("bad_words", []):
             if word in text_lower:
@@ -363,7 +369,6 @@ def handle_all_messages(message):
                 bot.reply_to(message, random.choice(["За такой базар можно и на бутылку присесть.", "Фильтруй речь, тут приличные люди."]))
                 break
                 
-        # Триггеры
         for trig, ans in settings.get("triggers", {}).items():
             if trig in text_lower:
                 bot.reply_to(message, ans)
@@ -409,54 +414,56 @@ def background_worker():
                             profit = int((s["price"] * s["qty"]) * 0.8)
                             balance_add += profit
                             xp_add += s["qty"]
-                            bot.send_message(u["_id"], f"✅ Твои закладки ({s['item']}) проданы! Прибыль: {profit} (с учетом доли курьера).")
+                            try: bot.send_message(u["_id"], f"✅ Твои закладки ({s['item']}) проданы! Прибыль: {profit} (с учетом доли курьера).")
+                            except: pass
                         else:
-                            bot.send_message(u["_id"], f"❌ Шкуроходы взорвали твой клад с {s['item']}. Товар утерян.")
+                            try: bot.send_message(u["_id"], f"❌ Шкуроходы взорвали твой клад с {s['item']}. Товар утерян.")
+                            except: pass
                     else:
                         active.append(s)
                 
                 if balance_add > 0 or len(active) != len(u["active_sales"]):
-                    update_user(u["_id"], {"active_sales": active, "balance": u["balance"] + balance_add, "drug_xp": u["drug_xp"] + xp_add})
+                    update_user(u["_id"], {"active_sales": active, "balance": u["balance"] + balance_add, "drug_xp": u.get("drug_xp", 0) + xp_add})
                     
-                    new_lvl = u["drug_lvl"]
+                    new_lvl = u.get("drug_lvl", 1)
                     for lvl, xp in LEVEL_XP.items():
-                        if u["drug_xp"] + xp_add >= xp and lvl > new_lvl: new_lvl = lvl
-                    if new_lvl > u["drug_lvl"]:
+                        if u.get("drug_xp", 0) + xp_add >= xp and lvl > new_lvl: new_lvl = lvl
+                    if new_lvl > u.get("drug_lvl", 1):
                         update_user(u["_id"], {"drug_lvl": new_lvl})
-                        bot.send_message(u["_id"], f"👑 Уровень империи повышен до {new_lvl}!")
+                        try: bot.send_message(u["_id"], f"👑 Уровень империи повышен до {new_lvl}!")
+                        except: pass
 
             conf = settings_col.find_one({"_id": "config"})
             if conf and conf.get("main_chat_id") and current_time == "16:20" and last_420 != current_day:
                 last_420 = current_day
                 phrases = ["Время взрывать!", "Пора взрывать!", "Time for smoking!", "4:20!", "Взрывай!!!", "Курим чуваки!"]
-                bot.send_message(conf["main_chat_id"], random.choice(phrases))
+                try: bot.send_message(conf["main_chat_id"], random.choice(phrases))
+                except: pass
                 
             time.sleep(15)
         except Exception as e:
             print("Ошибка в потоке:", e)
             time.sleep(15)
 
-# === НАДЕЖНЫЙ ЗАПУСК СЕРВЕРА И БОТА ===
+# === ЗАПУСК СЕРВЕРА И БОТА ===
 if __name__ == '__main__':
-    # 1. Фоновые задачи (закладки и 16:20)
     threading.Thread(target=background_worker, daemon=True).start()
     
-    # 2. Безопасный запуск пуллинга ТГ-бота
     def run_bot_polling():
-        try:
-            bot.remove_webhook()
-            print("!!! БОТ УСПЕШНО ЗАПУСТИЛ POLLING !!!")
-            bot.infinity_polling(skip_pending=True)
-        except Exception as e:
-            print(f"Критическая ошибка пуллинга: {e}")
+        while True:
+            try:
+                bot.remove_webhook()
+                print("!!! БОТ УСПЕШНО ЗАПУСТИЛ POLLING !!!")
+                bot.infinity_polling(skip_pending=True, allowed_updates=['message', 'edited_message', 'channel_post', 'callback_query'])
+            except Exception as e:
+                print(f"Ошибка пуллинга: {e}")
+                time.sleep(5)
 
     threading.Thread(target=run_bot_polling, daemon=True).start()
 
-    # 3. Flask-сервер в основном потоке для Render
     app = Flask(__name__)
     @app.route('/')
-    def home(): 
-        return "Бот работает, пацаны!"
+    def home(): return "Бот работает, пацаны!"
     
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
