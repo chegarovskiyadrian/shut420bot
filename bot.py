@@ -299,16 +299,35 @@ def d_sell(message):
 @bot.message_handler(commands=['drug_status'])
 def d_stat(message):
     u = get_user(message.from_user.id, message.from_user.username)
-    text = f"🍁 **ИМПЕРИЯ** (Уровень: {u.get('drug_lvl', 1)}) | Опыт: {u.get('drug_xp', 0)}\n\nСклад:\n"
-    for k, v in u.get("inv", {}).items():
-        if v > 0: text += f"▪️ {k}: {v} шт.\n"
+    current_lvl = u.get('drug_lvl', 1)
     
+    text = f"🍁 **ИМПЕРИЯ** (Уровень: {current_lvl}) | Опыт: {u.get('drug_xp', 0)}\n\n"
+    
+    # 1. Вывод склада
+    text += "📦 **Твой склад:**\n"
+    has_items = False
+    for k, v in u.get("inv", {}).items():
+        if v > 0:
+            text += f"▪️ {k}: {v} шт.\n"
+            has_items = True
+    if not has_items:
+        text += "▪️ Склад пуст\n"
+        
+    # 2. Вывод доступного ассортимента под уровень
+    text += f"\n🛒 **Доступно для закупки (Твой уровень: {current_lvl}):**\n"
+    for item, data in DRUGS_DATA.items():
+        if current_lvl >= data["level"]:
+            text += f"▪️ {item} — {data['price']} монет\n"
+            
+    # 3. Вывод активных закладок
     if u.get("active_sales"):
-        text += "\n⏳ В процессе закладок:\n"
+        text += "\n⏳ **В процессе закладок:**\n"
         for s in u["active_sales"]:
             rem = max(0, int((s['eta'] - time.time()) // 60))
             text += f"▪️ {s['item']} ({s['qty']} шт.) — Осталось {rem} мин.\n"
-    bot.reply_to(message, text)
+            
+    text += "\nЗакупка: `/drug_buy [Название] [Кол-во]`"
+    bot.reply_to(message, text, parse_mode="Markdown")
 
 @bot.message_handler(commands=['slots'])
 def play_slots(message):
